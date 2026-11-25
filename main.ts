@@ -1,82 +1,97 @@
-// The One-Line Exit — entry for make.fun bounty
-// u-kreutzx-the-one-line-exit-1dc652d1
-//
-// The entry is a one-line resignation letter from an IT support worker:
-// it opens with the classic "turn it off and on again" and lands the
-// punch on the one thing that actually needed restarting — the career.
-// Total entry: 1-140 characters (counted by code points), ASCII only,
-// single line, no leading/trailing whitespace, no trailing newline.
-
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export const ENTRY: string =
+// The entry: a one-sentence resignation letter from an IT support desk.
+export const ENTRY =
   "I hereby resign from IT support: I have turned it off and on again, and it turns out the thing that needed restarting was my career.";
 
-/**
- * Validate an entry against the bounty gates:
- * - 1-140 characters, counted by code points
- * - not only whitespace
- * - no leading or trailing whitespace
- * - exactly one line (no "\n", no "\r")
- * - printable ASCII only (no control characters, no non-ASCII)
- *
- * Each gate lives in its own helper so a failure names the exact rule
- * that was broken, and validateEntry reads as the checklist itself.
- */
-function fail(message: string): never {
-  throw new Error(message);
+const MAX_CHARS = 140;
+const PRINTABLE_LOW = 0x20; // space
+const PRINTABLE_HIGH = 0x7e; // tilde
+
+/** Length in Unicode code points, so astral characters count as one. */
+function codePointLength(value: string): number {
+  let total = 0;
+  for (const _ch of value) total += 1;
+  return total;
 }
 
-function assertLength(text: string): void {
-  const codePoints = [...text].length;
-  if (codePoints < 1 || codePoints > 140) {
-    fail(`entry must be 1-140 characters, got ${codePoints} code points`);
-  }
+function fail(why: string): never {
+  throw new Error(`One-Line Exit: entry failed validation — ${why}`);
 }
 
-function assertNotBlank(text: string): void {
-  if (text.trim() === "") {
-    fail("entry must not be only whitespace");
+/** The first character outside printable ASCII, or undefined when all pass. */
+function firstNonPrintable(value: string): string | undefined {
+  for (const ch of value) {
+    const cp = ch.codePointAt(0) ?? 0;
+    if (cp < PRINTABLE_LOW || cp > PRINTABLE_HIGH) return ch;
   }
-  if (text !== text.trim()) {
-    fail("entry must not have leading or trailing whitespace");
-  }
+  return undefined;
 }
 
-function assertSingleLine(text: string): void {
-  if (text.includes("\r")) {
-    fail("entry must not contain carriage returns");
-  }
-  if (text.includes("\n")) {
-    fail("entry must be a single line");
-  }
+/** One gate in the checklist. `test` returns true when the entry passes. */
+interface Gate {
+  label: string;
+  test: (text: string) => boolean;
+  detail: (text: string) => string;
 }
 
-function assertPrintableAscii(text: string): void {
-  for (const ch of text) {
-    const code = ch.codePointAt(0)!;
-    if (code > 127) {
-      fail("entry must be ASCII only");
+/** Every rule the bounty asks for, as data instead of nested ifs. */
+const GATES: Gate[] = [
+  {
+    label: "length",
+    test: (text) => codePointLength(text) >= 1 && codePointLength(text) <= MAX_CHARS,
+    detail: (text) =>
+      `entry is ${codePointLength(text)} code points; it must be between 1 and ${MAX_CHARS}`,
+  },
+  {
+    label: "printable-ascii",
+    test: (text) => firstNonPrintable(text) === undefined,
+    detail: (text) => {
+      const bad = firstNonPrintable(text) as string;
+      return `character ${JSON.stringify(bad)} (U+${(bad.codePointAt(0) as number).toString(16).toUpperCase().padStart(4, "0")}) is outside printable ASCII`;
+    },
+  },
+  {
+    label: "single-line",
+    test: (text) => !text.includes("\n") && !text.includes("\r"),
+    detail: () => "entry spans more than one line",
+  },
+  {
+    label: "no-edge-whitespace",
+    test: (text) => text === text.trim(),
+    detail: () => "entry begins or ends with whitespace",
+  },
+  {
+    label: "not-blank",
+    test: (text) => text.trim().length > 0,
+    detail: () => "entry is only whitespace",
+  },
+];
+
+/** Run every gate in order; the first failure stops the run. */
+function auditEntry(text: string): void {
+  for (const gate of GATES) {
+    if (!gate.test(text)) {
+      fail(`${gate.label}: ${gate.detail(text)}`);
     }
-    if (code < 32 || code === 127) {
-      fail("entry must not contain control characters");
-    }
   }
 }
 
-export function validateEntry(text: string): void {
-  assertLength(text);
-  assertNotBlank(text);
-  assertSingleLine(text);
-  assertPrintableAscii(text);
+function outputFolder(): string {
+  const dir = process.env.MAKEFUN_OUTPUT_DIR;
+  return dir && dir.length > 0 ? dir : "/output";
 }
 
-function main(): void {
-  validateEntry(ENTRY);
-  const outputDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
-  mkdirSync(outputDir, { recursive: true });
-  writeFileSync(join(outputDir, "entry.txt"), ENTRY, "utf8");
+function run(): void {
+  auditEntry(ENTRY);
+  const folder = outputFolder();
+  mkdirSync(folder, { recursive: true });
+  const destination = join(folder, "entry.txt");
+  writeFileSync(destination, ENTRY, "utf8");
+  console.log(
+    `One-Line Exit: wrote ${codePointLength(ENTRY)}-character entry (${GATES.length} gates passed) to ${destination}`,
+  );
 }
 
-main();
+run();
